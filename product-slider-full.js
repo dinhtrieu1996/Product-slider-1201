@@ -7730,23 +7730,16 @@ $("body")
 .find(".simesy-slider-section")
 .each(function (i, v) {
 var id = $(this).data("slider-id");
-var shop = 'testimonial-slider.myshopify.com';
+var shop = window.Shopify.shop;
 $.ajax({
-url: "http://product-slider.simesy.com/api/get_slider",
+url: "http://product-slider-dev.simesy.com/api/get_slider",
 type: "post",
 dataType: "JSON",
 async: false,
 data: { id: id, shop: shop },
 success: function (response) {
 var config = response.data.slider.config;
-config["filter_product"] = 'related';
-config["vendor"] = ["United By Blue"];
-config["type"] = ["abc"];
-config["tag"] = ["new","best-seller"];
-config["sortby"] = 'best-selling';
-config["collection"] = [{'handle':'all'}];
-var list_products = config.collection[0].handle;
-get_slider(config, id, list_products);
+get_slider(config, id);
 },
 });
 });
@@ -7946,7 +7939,7 @@ return {
 formatMoney: formatMoney
 };
 })();
-var get_slider = function (config, id, handle) {
+var get_slider = function (config, id) {
 $('.simesy-slider-section[data-slider-id="' + id + '"]').addClass(
 "simesy-slider-section-" + id + ""
 );
@@ -9377,847 +9370,873 @@ $(".simesy-slider-section-" + id).addClass(
 $(".simesy-slider-section-" + id).html(html);
 
 var list_products = [];
-if(config.filter_product == 'related'){
-  var related_conditions = ["vendor","type","tag"];
+if(config.filter_products == 'related'){
+  var field_condition = simesyProductSlider.data;
+  var related_conditions = config.related_conditions;
   var params = {
     vendor:[],
     type:[],
     tag:[],
+    collection:[],
   };
   $.each(related_conditions,function(i,v){
     var name_field = v;
-    $.each(config[v],function(i,key){
-      params[name_field].push('('+name_field+':"'+key+'")')
+    $.each(field_condition[v],function(i,key){
+      if(name_field == 'tags'){
+        params["tag"].push('(tag:"'+key+'")');
+      }else{
+        params[name_field].push('('+name_field+':"'+key+'")');
+      }
     })
   })
   $.each(params,function(i,param){
-    if(param.length > 0 && list_products.length < 10){
+    if(param.length > 0){
       var str_filter = Object.values(param).join(' AND ');
       $.ajax({
         async:false,
         url:'/search?q='+str_filter+'&view=simesy-product-slider',
         success:function(data){
-          list_products = JSON.parse(data);
+          $.each(JSON.parse(data),function(i,pro){
+            var check_null = list_products.find(function(el){
+              return el.handle == pro.handle
+            });
+            if(check_null == undefined){
+              list_products.push(pro);
+            }
+          })
         }
       })
     }
+
   })
-
-
-}else if (config.filter_product == 'recently_viewed'){
+}else if (config.filter_products == 'recently_viewed'){
   var get_local_recently = localStorage.getItem('simesy_recently');
   var get_recently = get_local_recently ? JSON.parse(get_local_recently) : [];
-list_products = get_recently;
+  list_products = get_recently;
 
 }else{
+  var handle = config.collection.length > 0 ? config.collection[0].handle : 'all';
+  switch (config.filter_products){
+    case 'best_selling':
+      var sortby = 'best-selling';
+      break;
+    case 'latest':
+      var sortby = 'created-descending';
+      break;
+    default:
+       var sortby = 'manual';
+      break
+  }
   $.ajax({
     async:false,
-    url:'/collections/'+handle+'?sort_by='+config.sortby+'&view=simesy-product-slider',
+    url:'/collections/'+handle+'?sort_by='+sortby+'&view=simesy-product-slider',
     success:function(data){
       list_products = JSON.parse(data);
     }
   })
 }
-
-$.each(list_products, function (index, value) {
-  var avai = value.available;
-  var avai_stock = value.available;
-  var quantity_stock = 0;
-  var price_max = 0,price_min = 0;
-  var array_price =[];
-  var check_sale = false;
-  var prices = {
-    price: [],
-    compare_at_price: []
-  };
-  $.each(value.variants,function(i,variant){
-    if(variant.compare_at_price != null && parseFloat(variant.compare_at_price) > parseFloat(variant.price)){
-      array_price.push(variant.compare_at_price);
-      check_sale = true;
-      prices.price.push(variant.price);
-      prices.compare_at_price.push(variant.compare_at_price);
-    }else{
-      array_price.push(variant.price);
-      prices.price.push(variant.price);
-      prices.compare_at_price.push(variant.compare_at_price);
+if(list_products.length > 0){
+  var list_products = list_products.slice(0,parseInt(config.number_of_total_products));
+  $.each(list_products, function (index, value) {
+    var avai = value.available;
+    var avai_stock = value.available;
+    var quantity_stock = 0;
+    var price_max = 0,price_min = 0;
+    var array_price =[];
+    var check_sale = false;
+    var prices = {
+      price: [],
+      compare_at_price: []
+    };
+    $.each(value.variants,function(i,variant){
+      if(variant.compare_at_price != null && parseFloat(variant.compare_at_price) > parseFloat(variant.price)){
+        array_price.push(variant.compare_at_price);
+        check_sale = true;
+        prices.price.push(variant.price);
+        prices.compare_at_price.push(variant.compare_at_price);
+      }else{
+        array_price.push(variant.price);
+        prices.price.push(variant.price);
+        prices.compare_at_price.push(variant.compare_at_price);
+      }
+    });
+    prices.price = prices.price.sort(function(a, b){return a - b});
+    prices.compare_at_price = prices.compare_at_price.sort(function(a, b){return a - b});
+    function maxValue(array_price) {
+      return array_price.reduce((max, val) => parseFloat(max) > parseFloat(val) ? max : val)
+    }
+    if(check_sale){
+      price_max = maxValue(array_price);
+    }
+    function minValue(array_price) {
+      return array_price.reduce((max, val) => parseFloat(max) < parseFloat(val) ? max : val)
+    }
+    price_min = minValue(array_price);
+    if(avai){
+      data_all.push({
+        status: avai,
+        pro_id:value.id,
+        available: avai_stock,
+        image: value.featured_image != null ? value.featured_image: "https://cdn.shopify.com/s/files/1/0533/2089/files/placeholder-images-product-1_medium.png",
+        url: "/products/" + value.handle,
+        title: value.title,
+        description: value.description,
+        price: price_min,
+        compare_price: price_max,
+        id: value.variants[0].id,
+        variants: value.variants,
+        prices: prices,
+        is_sale: check_sale
+      });
     }
   });
-  prices.price = prices.price.sort(function(a, b){return a - b});
-  prices.compare_at_price = prices.compare_at_price.sort(function(a, b){return a - b});
-  function maxValue(array_price) {
-    return array_price.reduce((max, val) => parseFloat(max) > parseFloat(val) ? max : val)
-  }
-  if(check_sale){
-    price_max = maxValue(array_price);
-  }
-  function minValue(array_price) {
-    return array_price.reduce((max, val) => parseFloat(max) < parseFloat(val) ? max : val)
-  }
-  price_min = minValue(array_price);
-  if(avai){
-    data_all.push({
-      status: avai,
-      pro_id:value.id,
-      available: avai_stock,
-      image: value.featured_image != null ? value.featured_image: "https://cdn.shopify.com/s/files/1/0533/2089/files/placeholder-images-product-1_medium.png",
-      url: "/products/" + value.handle,
-      title: value.title,
-      description: value.description,
-      price: price_min,
-      compare_price: price_max,
-      id: value.variants[0].id,
-      variants: value.variants,
-      prices: prices,
-      is_sale: check_sale
-    });
-  }
-});
-$.each(data_all, function (index, product_data) {
-  var html_img = "",
-      html_img_box = "",
-      html_title = "",
-      html_des = "",
-      html_price = "",
-      html_variant = "";
-  var class_gird =
-      layout_present == "grid"
-  ? "simesy-product-item simesy-masonry-item sp-simesy-col-xl-4 sp-simesy-col-lg-3 sp-simesy-col-md-2 sp-simesy-col-sm-1"
-  : "";
-  var html_theme =
-      '<div class="simesy-product-item simesy-product ' +
-      class_gird +
-      '"><div class="simesy-product-data">';
+  $.each(data_all, function (index, product_data) {
+    var html_img = "",
+        html_img_box = "",
+        html_title = "",
+        html_des = "",
+        html_price = "",
+        html_variant = "";
+    var class_gird =
+        layout_present == "grid"
+    ? "simesy-product-item simesy-masonry-item sp-simesy-col-xl-4 sp-simesy-col-lg-3 sp-simesy-col-md-2 sp-simesy-col-sm-1"
+    : "";
+    var html_theme =
+        '<div class="simesy-product-item simesy-product ' +
+        class_gird +
+        '"><div class="simesy-product-data">';
 
-  if (product_image) {
-    function imgURL(src, image_size, size) {
-      src = src.replace(
-        /_(pico|icon|thumb|small|compact|medium|large|grande|original|1024x1024|2048x2048|master)+\./g,
-        "."
-      );
-      if (image_size === "default") {
-        return src;
+    if (product_image) {
+      function imgURL(src, image_size, size) {
+        src = src.replace(
+          /_(pico|icon|thumb|small|compact|medium|large|grande|original|1024x1024|2048x2048|master)+\./g,
+          "."
+        );
+        if (image_size === "default") {
+          return src;
+        }
+
+        return src.replace(/\.jpg|\.png|\.gif|\.jpeg/g, function (match) {
+          return "_" + size + match;
+
+        });
+
       }
-
-      return src.replace(/\.jpg|\.png|\.gif|\.jpeg/g, function (match) {
-        return "_" + size + match;
-
-      });
-
-    }
-    var href_image = product_data.url;
-    if (image_lightbox) {
-      href_image = product_data.image;
-    }
-    var attr_title = "";
-    if (image_title_attr) {
-      attr_title = 'alt="' + product_data.title + '"';
-    }
-    html_img +=
-      '<a href="' +
-      href_image +
-      '" target="' +
-      product_link_target +
-      '" class="simesy-product-image sp-simesy-lightbox ' +
-      image_gray_scale +
-      '">';
-    if ("theme_thirteen" == theme_style) {
-      html_img += '<div class="product-overlay-color"></div>';
-    }
-    html_img +=
-      '<img src="' +
-      imgURL(product_data.image, image_size, image_size_w + "x" + image_size_h) +
-      '" class="simesy-product-img" ' +
-      attr_title +
-      "/>";
-    html_img_box +=
-      '<div class="simesy-product-image-area"><a href="' +
-      href_image +
-      '" target="' +
-      product_link_target +
-      '" class="simesy-product-image sp-simesy-lightbox ' +
-      image_gray_scale +
-      '"><img src="' +
-      imgURL(product_data.image, image_size, image_size_w + "x" + image_size_h) +
-      '" class="simesy-product-img" ' +
-      attr_title +
-      "/></a></div>";
-
-    if (theme_style != "theme_twenty_two") {
-      if (!product_data.available && out_of_stock_ribbon) {
-        html_img +=
-          '<div class="simesy-out-of-stock" title="' +
-          out_of_stock_ribbon_text +
-          '">' +
-          out_of_stock_ribbon_text +
-          "</div>";
+      var href_image = product_data.url;
+      if (image_lightbox) {
+        href_image = product_data.image;
       }
-      if (sale_ribbon && product_data.is_sale) {
-        html_img +=
-          '<div class="sale_text" title="' +
-          sale_ribbon_text +
-          '">' +
-          sale_ribbon_text +
-          "</div>";
+      var attr_title = "";
+      if (image_title_attr) {
+        attr_title = 'alt="' + product_data.title + '"';
       }
-    }
-    html_img += "</a>";
-  }
+      html_img +=
+        '<a href="' +
+        href_image +
+        '" target="' +
+        product_link_target +
+        '" class="simesy-product-image sp-simesy-lightbox ' +
+        image_gray_scale +
+        '">';
+      if ("theme_thirteen" == theme_style) {
+        html_img += '<div class="product-overlay-color"></div>';
+      }
+      html_img +=
+        '<img src="' +
+        imgURL(product_data.image, image_size, image_size_w + "x" + image_size_h) +
+        '" class="simesy-product-img" ' +
+        attr_title +
+        "/>";
+      html_img_box +=
+        '<div class="simesy-product-image-area"><a href="' +
+        href_image +
+        '" target="' +
+        product_link_target +
+        '" class="simesy-product-image sp-simesy-lightbox ' +
+        image_gray_scale +
+        '"><img src="' +
+        imgURL(product_data.image, image_size, image_size_w + "x" + image_size_h) +
+        '" class="simesy-product-img" ' +
+        attr_title +
+        "/></a></div>";
 
-  if (product_name) {
-    var title_p = product_data.title;
-    if (product_name_word_limit) {
-      title_p = smartTrim(
-        title_p,
-        product_name_word_limit_number,
-        product_name_word_limit_after
-      );
+      if (theme_style != "theme_twenty_two") {
+        if (!product_data.available && out_of_stock_ribbon) {
+          html_img +=
+            '<div class="simesy-out-of-stock" title="' +
+            out_of_stock_ribbon_text +
+            '">' +
+            out_of_stock_ribbon_text +
+            "</div>";
+        }
+        if (sale_ribbon && product_data.is_sale) {
+          html_img +=
+            '<div class="sale_text" title="' +
+            sale_ribbon_text +
+            '">' +
+            sale_ribbon_text +
+            "</div>";
+        }
+      }
+      html_img += "</a>";
     }
-    html_title +=
-      '<div class="simesy-product-title"><a href="' +
-      product_data.url +
-      '" target="' +
-      product_link_target +
-      '">' +
-      title_p +
-      "</a></div>";
-  }
-  if (pro_price) {
-    html_price += '<div class="simesy-product-price">';
-    var min_price = product_data.prices.price[0];
-    var max_price = product_data.prices.price[product_data.prices.price.length - 1];
-    var min_compare_at_price = product_data.prices.compare_at_price[0];
-    var max_compare_at_price = product_data.prices.compare_at_price[product_data.prices.compare_at_price.length - 1];
-    if (min_price !== max_price) {
-      html_price += '<span class="amount">' + theme.Currency.formatMoney(min_price, theme.moneyFormat) + ' - ' + theme.Currency.formatMoney(max_price, theme.moneyFormat) + '</span>';
-    } else if (product_data.is_sale && min_compare_at_price === max_compare_at_price ) {
-      html_price += '<del><span class="amount">' + theme.Currency.formatMoney(max_compare_at_price, theme.moneyFormat) + '</span></del>' + '<span class="amout">' + theme.Currency.formatMoney(min_price, theme.moneyFormat) + '</span>';
-    } else {
-      html_price += '<span class="amount">' + theme.Currency.formatMoney(min_price, theme.moneyFormat) + '</span>'
-    }
-    html_price += "</div>";
-  }
-  if (pro_des) {
-    var des = product_data.description;
-    if (config.product_content_type == "short_description") {
-      des = des.replace(/(<([^>]+)>)/gi, "");
-      //des = des.slice(0,config.product_content_word_limit) + (des.length > config.product_content_word_limit ? '...' : '');
-      des = smartTrim(
-        des,
-        product_des_word_limit_number,
-        product_des_word_limit_after
-      );
-    }
-    html_des += '<div class="simesy-product-content">' + des;
-    if (
-      (theme_style == "theme_three" || theme_style == "theme_sixteen") &&
-      config.product_content_more_button
-    ) {
-      html_des +=
-        '<div class="simesy-product-more-content"><a href="' +
+
+    if (product_name) {
+      var title_p = product_data.title;
+      if (product_name_word_limit) {
+        title_p = smartTrim(
+          title_p,
+          product_name_word_limit_number,
+          product_name_word_limit_after
+        );
+      }
+      html_title +=
+        '<div class="simesy-product-title"><a href="' +
         product_data.url +
         '" target="' +
         product_link_target +
         '">' +
-        config.product_content_more_button_text +
+        title_p +
         "</a></div>";
     }
-    html_des += "</div>";
-  }
-  if (config.show_variants_selector){
-    var hide_select = (product_data.variants.length) == 1 ? ' style="display:none"' : '';
-    html_variant += '<select class="simesy-select-variant"'+hide_select+'>';
-    $.each(product_data.variants,function(i,variant){
-      if(variant.available){
-        html_variant += '<option value="'+variant.id+'">'+variant.title+'</option>';
-      }else{
-        html_variant += '<option value="'+variant.id+'" disabled>'+variant.title+'</option>';
+    if (pro_price) {
+      html_price += '<div class="simesy-product-price">';
+      var min_price = product_data.prices.price[0];
+      var max_price = product_data.prices.price[product_data.prices.price.length - 1];
+      var min_compare_at_price = product_data.prices.compare_at_price[0];
+      var max_compare_at_price = product_data.prices.compare_at_price[product_data.prices.compare_at_price.length - 1];
+      if (min_price !== max_price) {
+        html_price += '<span class="amount">' + theme.Currency.formatMoney(min_price, theme.moneyFormat) + ' - ' + theme.Currency.formatMoney(max_price, theme.moneyFormat) + '</span>';
+      } else if (product_data.is_sale && min_compare_at_price === max_compare_at_price ) {
+        html_price += '<del><span class="amount">' + theme.Currency.formatMoney(max_compare_at_price, theme.moneyFormat) + '</span></del>' + '<span class="amout">' + theme.Currency.formatMoney(min_price, theme.moneyFormat) + '</span>';
+      } else {
+        html_price += '<span class="amount">' + theme.Currency.formatMoney(min_price, theme.moneyFormat) + '</span>'
       }
-    })
-    html_variant += '</select>';
-  }
+      html_price += "</div>";
+    }
+    if (pro_des) {
+      var des = product_data.description;
+      if (config.product_content_type == "short_description") {
+        des = des.replace(/(<([^>]+)>)/gi, "");
+        //des = des.slice(0,config.product_content_word_limit) + (des.length > config.product_content_word_limit ? '...' : '');
+        des = smartTrim(
+          des,
+          product_des_word_limit_number,
+          product_des_word_limit_after
+        );
+      }
+      html_des += '<div class="simesy-product-content">' + des;
+      if (
+        (theme_style == "theme_three" || theme_style == "theme_sixteen") &&
+        config.product_content_more_button
+      ) {
+        html_des +=
+          '<div class="simesy-product-more-content"><a href="' +
+          product_data.url +
+          '" target="' +
+          product_link_target +
+          '">' +
+          config.product_content_more_button_text +
+          "</a></div>";
+      }
+      html_des += "</div>";
+    }
+    if (config.show_variants_selector){
+      var hide_select = (product_data.variants.length) == 1 ? ' style="display:none"' : '';
+      html_variant += '<select class="simesy-select-variant"'+hide_select+'>';
+      $.each(product_data.variants,function(i,variant){
+        if(variant.available){
+          html_variant += '<option value="'+variant.id+'">'+variant.title+'</option>';
+        }else{
+          html_variant += '<option value="'+variant.id+'" disabled>'+variant.title+'</option>';
+        }
+      })
+      html_variant += '</select>';
+    }
 
-  if (theme_style == "theme_three") {
-    html_theme += '<div class="simesy-product-image-area">' + html_img + "";
+    if (theme_style == "theme_three") {
+      html_theme += '<div class="simesy-product-image-area">' + html_img + "";
 
-    if (add_to_cart_button) {
-      html_theme +=
-        '<div class="simesy-cart-button"><p class="product woocommerce add_to_cart_inline ">';
-      if(config.show_variants_selector){
+      if (add_to_cart_button) {
         html_theme +=
-          '<a href="javascript:void(0)" class="button add-to-cart" data-id="' +
-          product_data.pro_id +
-          '"><i class="fa fa-spinner" aria-hidden="true"></i>' + add_to_cart_button_text + '</a>';
-      }else{
-        html_theme +=
-          '<a href="'+product_data.url+'" class="button btn-readmore">' + add_to_cart_button_text + '</a>';
+          '<div class="simesy-cart-button"><p class="product woocommerce add_to_cart_inline ">';
+        if(config.show_variants_selector){
+          html_theme +=
+            '<a href="javascript:void(0)" class="button add-to-cart" data-id="' +
+            product_data.pro_id +
+            '"><i class="fa fa-spinner" aria-hidden="true"></i>' + add_to_cart_button_text + '</a>';
+        }else{
+          html_theme +=
+            '<a href="'+product_data.url+'" class="button btn-readmore">' + add_to_cart_button_text + '</a>';
+        }
+        html_theme += "</p></div>";
       }
-      html_theme += "</p></div>";
-    }
-    html_theme += "</div>";
-    html_theme +=
-      '<div class="product-details"><div class="product-details-inner">' +
-      html_title +
-      html_price +
-      html_des +
-      "</div></div>";
-    if(config.show_variants_selector){ 
-      html_theme += html_variant;
-    }
-  } else if (theme_style == "theme_four") {
-    html_theme += '<div class="simesy-product-image-area">' + html_img;
-    html_theme +=
-      '<div class="product-details"><div class="product-details-inner">' +
-      html_title +
-      html_price +
-      html_des;
-    if(config.show_variants_selector){ 
-      html_theme += html_variant;
-    }
-    if (add_to_cart_button) {
+      html_theme += "</div>";
       html_theme +=
-        '<div class="simesy-cart-button"><p class="product woocommerce add_to_cart_inline ">';
-      if(config.show_variants_selector){
-        html_theme +=
-          '<a href="javascript:void(0)" class="button add-to-cart" data-id="' +
-          product_data.pro_id +
-          '"><i class="fa fa-spinner" aria-hidden="true"></i>' + add_to_cart_button_text + '</a>';
-      }else{
-        html_theme +=
-          '<a href="'+product_data.url+'" class="button btn-readmore">' + add_to_cart_button_text + '</a>';
+        '<div class="product-details"><div class="product-details-inner">' +
+        html_title +
+        html_price +
+        html_des +
+        "</div></div>";
+      if(config.show_variants_selector){ 
+        html_theme += html_variant;
       }
-      html_theme += "</p></div>";
-    }
-    html_theme += "</div>";
-    html_theme += "</div>";
-  } else if (theme_style == "theme_five") {
-    html_theme += '<div class="simesy-product-image-area">' + html_img;
-    if(config.show_variants_selector){ 
-      html_theme += html_variant;
-    }
-    if (add_to_cart_button) {
-      html_theme += '<div class="simesy-buttons-area sp-text-center">';
+    } else if (theme_style == "theme_four") {
+      html_theme += '<div class="simesy-product-image-area">' + html_img;
       html_theme +=
-        '<div class="simesy-cart-button"><p class="product woocommerce add_to_cart_inline ">';
-      if(config.show_variants_selector){
-        html_theme +=
-          '<a href="javascript:void(0)" class="button add-to-cart" data-id="' +
-          product_data.pro_id +
-          '"><i class="fa fa-spinner" aria-hidden="true"></i>' + add_to_cart_button_text + '</a>';
-      }else{
-        html_theme +=
-          '<a href="'+product_data.url+'" class="button btn-readmore">' + add_to_cart_button_text + '</a>';
+        '<div class="product-details"><div class="product-details-inner">' +
+        html_title +
+        html_price +
+        html_des;
+      if(config.show_variants_selector){ 
+        html_theme += html_variant;
       }
-      html_theme += "</p></div>";
+      if (add_to_cart_button) {
+        html_theme +=
+          '<div class="simesy-cart-button"><p class="product woocommerce add_to_cart_inline ">';
+        if(config.show_variants_selector){
+          html_theme +=
+            '<a href="javascript:void(0)" class="button add-to-cart" data-id="' +
+            product_data.pro_id +
+            '"><i class="fa fa-spinner" aria-hidden="true"></i>' + add_to_cart_button_text + '</a>';
+        }else{
+          html_theme +=
+            '<a href="'+product_data.url+'" class="button btn-readmore">' + add_to_cart_button_text + '</a>';
+        }
+        html_theme += "</p></div>";
+      }
+      html_theme += "</div>";
+      html_theme += "</div>";
+    } else if (theme_style == "theme_five") {
+      html_theme += '<div class="simesy-product-image-area">' + html_img;
+      if(config.show_variants_selector){ 
+        html_theme += html_variant;
+      }
+      if (add_to_cart_button) {
+        html_theme += '<div class="simesy-buttons-area sp-text-center">';
+        html_theme +=
+          '<div class="simesy-cart-button"><p class="product woocommerce add_to_cart_inline ">';
+        if(config.show_variants_selector){
+          html_theme +=
+            '<a href="javascript:void(0)" class="button add-to-cart" data-id="' +
+            product_data.pro_id +
+            '"><i class="fa fa-spinner" aria-hidden="true"></i>' + add_to_cart_button_text + '</a>';
+        }else{
+          html_theme +=
+            '<a href="'+product_data.url+'" class="button btn-readmore">' + add_to_cart_button_text + '</a>';
+        }
+        html_theme += "</p></div>";
+        html_theme +=
+          '<div class="simesy-view-details"><a href="' +
+          product_data.url +
+          '" target="' +
+          product_link_target +
+          '">View Detail</a></div>';
+        html_theme += "</div>";
+      }
+      html_theme += "</div>";
       html_theme +=
-        '<div class="simesy-view-details"><a href="' +
+        '<div class="product-details"><div class="product-details-inner">' +
+        html_title +
+        html_price +
+        html_des+
+        "</div></div";
+    } else if (theme_style == "theme_six") {
+      html_theme += '<div class="simesy-product-image-area">' + html_img;
+      if(config.show_variants_selector){ 
+        html_theme += html_variant;
+      }
+      if (add_to_cart_button) {
+        html_theme += '<div class="simesy-buttons-area sp-text-center">';
+        html_theme +=
+          '<div class="simesy-cart-button"><p class="product woocommerce add_to_cart_inline ">';
+        if(config.show_variants_selector){
+          html_theme +=
+            '<a href="javascript:void(0)" class="button add-to-cart" data-id="' +
+            product_data.pro_id +
+            '"><i class="fa fa-spinner" aria-hidden="true"></i>' + add_to_cart_button_text + '</a>';
+        }else{
+          html_theme +=
+            '<a href="'+product_data.url+'" class="button btn-readmore">' + add_to_cart_button_text + '</a>';
+        }
+        html_theme += "</p></div>";
+        html_theme += "</div>";
+      }
+      html_theme += "</div>";
+      html_theme +=
+        '<div class="product-details"><div class="product-details-inner">' +
+        html_title +
+        html_price +
+        html_des+
+        "</div></div";
+    } else if (theme_style == "theme_seven") {
+      html_theme +=
+        '<div class="simesy-product-image-area"><div class="product-overlay-color"></div>';
+      html_theme +=
+        '<div class="product-details"><div class="product-details-inner">' +
+        html_title +
+        html_price +
+        "</div></div>";
+      html_theme += html_img;
+      if(config.show_variants_selector){ 
+        html_theme += html_variant;
+      }
+      if (add_to_cart_button) {
+        html_theme += '<div class="simesy-buttons-area sp-text-center">';
+        html_theme +=
+          '<div class="simesy-cart-button"><p class="product woocommerce add_to_cart_inline ">';
+        if(config.show_variants_selector){
+          html_theme +=
+            '<a href="javascript:void(0)" class="button add-to-cart" data-id="' +
+            product_data.pro_id +
+            '"><i class="fa fa-spinner" aria-hidden="true"></i>' + add_to_cart_button_text + '</a>';
+        }else{
+          html_theme +=
+            '<a href="'+product_data.url+'" class="button btn-readmore">' + add_to_cart_button_text + '</a>';
+        }
+        html_theme += "</p></div>";
+        html_theme += "</div>";
+      }
+      html_theme += "</div>";
+    } else if (theme_style == "theme_eight") {
+      html_theme += '<div class="simesy-product-image-area">' + html_img + "";
+      if(config.show_variants_selector){ 
+        html_theme += html_variant;
+      }
+      if (add_to_cart_button) {
+        html_theme += '<div class="simesy-buttons-area sp-text-right">';
+        html_theme +=
+          '<div class="simesy-cart-button"><p class="product woocommerce add_to_cart_inline ">';
+        if(config.show_variants_selector){
+          html_theme +=
+            '<a href="javascript:void(0)" class="button add-to-cart" data-id="' +
+            product_data.pro_id +
+            '"><i class="fa fa-spinner" aria-hidden="true"></i>' + add_to_cart_button_text + '</a>';
+        }else{
+          html_theme +=
+            '<a href="'+product_data.url+'" class="button btn-readmore">' + add_to_cart_button_text + '</a>';
+        }
+        html_theme += "</p></div>";
+        html_theme += "</div>";
+      }
+      html_theme += "</div>";
+      html_theme +=
+        '<div class="product-details"><div class="product-details-inner">' +
+        html_title +
+        html_price +
+        html_des+
+        "</div></div>";
+    } else if (theme_style == "theme_nine") {
+      html_theme += '<div class="simesy-product-image-area">' + html_img + "";
+      if(config.show_variants_selector){ 
+        html_theme += html_variant;
+      }
+      if (add_to_cart_button) {
+        html_theme += '<div class="simesy-buttons-area sp-text-center">';
+        html_theme +=
+          '<div class="simesy-cart-button"><p class="product woocommerce add_to_cart_inline ">';
+        if(config.show_variants_selector){
+          html_theme +=
+            '<a href="javascript:void(0)" class="button add-to-cart" data-id="' +
+            product_data.pro_id +
+            '"><i class="fa fa-spinner" aria-hidden="true"></i>' + add_to_cart_button_text + '</a>';
+        }else{
+          html_theme +=
+            '<a href="'+product_data.url+'" class="button btn-readmore">' + add_to_cart_button_text + '</a>';
+        }
+        html_theme += "</p></div>";
+        html_theme += "</div>";
+      }
+      html_theme += "</div>";
+      html_theme +=
+        '<div class="product-details"><div class="product-details-inner">' +
+        html_title +
+        html_price +
+        html_des+
+        "</div></div>";
+    } else if (theme_style == "theme_eleven") {
+      html_theme +=
+        '<div class="simesy-product-image-area"><div class="product-overlay-color"></div>' +
+        html_img +
+        "";
+      html_theme +=
+        '<div class="product-details"><div class="product-details-inner">' +
+        html_title +
+        "";
+      html_theme +=
+        '<div class="product-details-inner-inner">' + html_price + html_des;
+      if(config.show_variants_selector){ 
+        html_theme += html_variant;
+      }
+      if (add_to_cart_button) {
+        html_theme +=
+          '<div class="simesy-cart-button"><p class="product woocommerce add_to_cart_inline ">';
+        if(config.show_variants_selector){
+          html_theme +=
+            '<a href="javascript:void(0)" class="button add-to-cart" data-id="' +
+            product_data.pro_id +
+            '"><i class="fa fa-spinner" aria-hidden="true"></i>' + add_to_cart_button_text + '</a>';
+        }else{
+          html_theme +=
+            '<a href="'+product_data.url+'" class="button btn-readmore">' + add_to_cart_button_text + '</a>';
+        }
+        html_theme += "</p></div>";
+      }
+      html_theme += "</div>";
+      html_theme += "</div></div>";
+      html_theme += "</div>";
+    } else if (theme_style == "theme_thirteen") {
+      html_theme += '<div class="simesy-product-image-area">';
+      if(config.show_variants_selector){ 
+        html_theme += html_variant;
+      }
+      if (add_to_cart_button) {
+        html_theme +=
+          '<div class="simesy-cart-button"><p class="product woocommerce add_to_cart_inline ">';
+        if(config.show_variants_selector){
+          html_theme +=
+            '<a href="javascript:void(0)" class="button add-to-cart" data-id="' +
+            product_data.pro_id +
+            '"><i class="fa fa-spinner" aria-hidden="true"></i>' + add_to_cart_button_text + '</a>';
+        }else{
+          html_theme +=
+            '<a href="'+product_data.url+'" class="button btn-readmore">' + add_to_cart_button_text + '</a>';
+        }
+        html_theme += "</p></div>";
+      }
+      html_theme += html_img;
+      html_theme += "</div>";
+      html_theme +=
+        '<div class="product-details"><div class="product-details-inner">' +
+        html_title +
+        html_price +
+        "</div>";
+    } else if (theme_style == "theme_fourteen") {
+      html_theme += html_img;
+      html_theme += '<div class="product-details">';
+      html_theme +=
+        '<div class="product-details-inner">' +
+        html_title +
+        html_price +
+        html_des +
+        "</div>";
+      if(config.show_variants_selector){ 
+        html_theme += html_variant;
+      }
+      if (add_to_cart_button) {
+        html_theme +=
+          '<div class="simesy-cart-button"><p class="product woocommerce add_to_cart_inline ">';
+        if(config.show_variants_selector){
+          html_theme +=
+            '<a href="javascript:void(0)" class="button add-to-cart" data-id="' +
+            product_data.pro_id +
+            '"><i class="fa fa-spinner" aria-hidden="true"></i>' + add_to_cart_button_text + '</a>';
+        }else{
+          html_theme +=
+            '<a href="'+product_data.url+'" class="button btn-readmore">' + add_to_cart_button_text + '</a>';
+        }
+        html_theme += "</p></div>";
+      }
+      html_theme += "</div>";
+    } else if (theme_style == "theme_fifteen") {
+      html_theme += '<div class="simesy-product-image-area">' + html_img;
+      if(config.show_variants_selector){ 
+        html_theme += html_variant;
+      }
+      if (add_to_cart_button) {
+        html_theme +=
+          '<div class="simesy-cart-button"><p class="product woocommerce add_to_cart_inline ">';
+        if(config.show_variants_selector){
+          html_theme +=
+            '<a href="javascript:void(0)" class="button add-to-cart" data-id="' +
+            product_data.pro_id +
+            '"><i class="fa fa-spinner" aria-hidden="true"></i>' + add_to_cart_button_text + '</a>';
+        }else{
+          html_theme +=
+            '<a href="'+product_data.url+'" class="button btn-readmore">' + add_to_cart_button_text + '</a>';
+        }
+        html_theme += "</p></div>";
+      }
+      html_theme += "</div>";
+      html_theme +=
+        '<div class="product-details"><div class="product-details-inner">' +
+        html_title +
+        html_price +
+        html_des + 
+        "</div></div>";
+    } else if (theme_style == "theme_sixteen") {
+      html_theme +=
+        '<div class="simesy-product-image-area">' + html_img + "</div>";
+      html_theme +=
+        '<div class="product-details"><div class="product-details-inner">' +
+        html_title +
+        html_price +
+        html_des;
+      if(config.show_variants_selector){ 
+        html_theme += html_variant;
+      }
+      if (add_to_cart_button) {
+        html_theme +=
+          '<div class="simesy-cart-button"><p class="product woocommerce add_to_cart_inline ">';
+        if(config.show_variants_selector){
+          html_theme +=
+            '<a href="javascript:void(0)" class="button add-to-cart" data-id="' +
+            product_data.pro_id +
+            '"><i class="fa fa-spinner" aria-hidden="true"></i>' + add_to_cart_button_text + '</a>';
+        }else{
+          html_theme +=
+            '<a href="'+product_data.url+'" class="button btn-readmore">' + add_to_cart_button_text + '</a>';
+        }
+        html_theme += "</p></div>";
+      }
+      html_theme += "</div></div>";
+    } else if (theme_style == "theme_seventeen") {
+      html_theme += '<div class="simesy-product-image-area">' + html_img;
+      if(config.show_variants_selector){ 
+        html_theme += html_variant;
+      }
+      if (add_to_cart_button) {
+        html_theme +=
+          '<div class="simesy-cart-button"><p class="product woocommerce add_to_cart_inline ">';
+        if(config.show_variants_selector){
+          html_theme +=
+            '<a href="javascript:void(0)" class="button add-to-cart" data-id="' +
+            product_data.pro_id +
+            '"><i class="fa fa-spinner" aria-hidden="true"></i>' + add_to_cart_button_text + '</a>';
+        }else{
+          html_theme +=
+            '<a href="'+product_data.url+'" class="button btn-readmore">' + add_to_cart_button_text + '</a>';
+        }
+        html_theme += "</p></div>";
+      }
+      html_theme += "</div>";
+      html_theme +=
+        '<div class="product-details"><div class="product-details-inner">' +
+        html_title +
+        html_price +
+        html_des +
+        "</div></div>";
+    } else if (theme_style == "theme_eighteen") {
+      //html_theme += html_img;
+      html_theme +=
+        '<div class="product-details"><div class="product-details-inner">' +
+        html_price +
+        html_title +
+        html_des;
+      if(config.show_variants_selector){ 
+        html_theme += html_variant;
+      }
+      if (add_to_cart_button) {
+        html_theme +=
+          '<div class="simesy-cart-button"><p class="product woocommerce add_to_cart_inline ">';
+        if(config.show_variants_selector){
+          html_theme +=
+            '<a href="javascript:void(0)" class="button add-to-cart" data-id="' +
+            product_data.pro_id +
+            '"><i class="fa fa-spinner" aria-hidden="true"></i>' + add_to_cart_button_text + '</a>';
+        }else{
+          html_theme +=
+            '<a href="'+product_data.url+'" class="button btn-readmore">' + add_to_cart_button_text + '</a>';
+        }
+        html_theme += "</p></div>";
+      }
+      html += "</div>";
+      html_theme += "</div>";
+    } else if (theme_style.trim() == "theme_twenty") {
+      html_theme += '<div class="simesy-product-box">';
+      html_theme += '<div class="simesy-product-cat"></div>';
+      html_theme += html_title;
+      html_theme += html_img_box;
+      html_theme +=
+        '<div class="product-details"><div class="product-details-inner">' +
+        html_price +
+        "</div></div>";
+      html_theme += '<div class="product-wishlist-com">';
+      html_theme +=
+        '<div class="woocommerce product compare-button"><a href="javascript:void(0)" class="compare">Compare</a></div>';
+      html_theme +=
+        '<div class="yith-wcwl-add-to-wishlist"><div class="yith-wcwl-add-button"><a href="javascript:void(0)" class="add_to_wishlist single_add_to_wishlist" data-title="Wishlist"><i class="yith-wcwl-icon fa fa-heart-o"></i><span>Wishlist</span></a></div></div>';
+      html_theme += "</div>";
+      html_theme += "</div>";
+    } else if (theme_style == "theme_twenty_one") {
+      html_theme += '<div class="simesy-product-box">';
+      html_theme += html_img_box;
+      html_theme += '<div class="simesy-product-content-area">';
+      html_theme +=
+        '<div class="product-details"><div class="product-details-inner sp-text-left">' +
+        html_title +
+        html_price +
+        "</div></div>";
+      html_theme += '<div class="product-wishlist-com">';
+      html_theme +=
+        '<div class="woocommerce product compare-button"><a href="javascript:void(0)" class="compare">Compare</a></div>';
+      html_theme +=
+        '<div class="yith-wcwl-add-to-wishlist"><div class="yith-wcwl-add-button"><a href="javascript:void(0)" class="add_to_wishlist single_add_to_wishlist" data-title="Wishlist"><i class="yith-wcwl-icon fa fa-heart-o"></i><span>Wishlist</span></a></div></div>';
+      html_theme += "</div>";
+      html_theme += "</div>";
+      html_theme += "</div>";
+    } else if (theme_style == "theme_twenty_two") {
+      html_theme +=
+        '<div class="product-details"><div class="product-details-inner sp-text-left">' +
+        html_title +
+        html_price +
+        "</div></div>";
+      html_theme += html_img;
+    } else if (theme_style == "theme_twenty_three") {
+      html_theme += '<div class="simesy-product-image-area">';
+      html_theme += html_img;
+      html_theme += '<div class="simesy-product-add-to-cart sp-text-center">';
+      if(config.show_variants_selector){ 
+        html_theme += html_variant;
+      }
+      if (add_to_cart_button) {
+        html_theme +=
+          '<div class="simesy-cart-button"><p class="product woocommerce add_to_cart_inline ">';
+        if(config.show_variants_selector){
+          html_theme +=
+            '<a href="javascript:void(0)" class="button add-to-cart" data-id="' +
+            product_data.pro_id +
+            '"><i class="fa fa-spinner" aria-hidden="true"></i>' + add_to_cart_button_text + '</a>';
+        }else{
+          html_theme +=
+            '<a href="'+product_data.url+'" class="button btn-readmore">' + add_to_cart_button_text + '</a>';
+        }
+        html_theme += "</p></div>";
+      }
+      html_theme += "</div>";
+      html_theme +=
+        '<div class="product-details"><div class="product-details-inner sp-text-center">' +
+        html_title +
+        html_price +
+        "</div></div>";
+      html_theme += "</div>";
+    } else if (theme_style == "theme_twenty_four") {
+      html_theme += '<div class="simesy-product-image-area">';
+      html_theme += html_img;
+      html_theme += '<div class="simesy-product-add-to-cart sp-text-center">';
+      html_theme += "<ul>";
+      html_theme += "<li>";
+      if(config.show_variants_selector){ 
+        html_theme += html_variant;
+      }
+      if (add_to_cart_button) {
+        html_theme +=
+          '<div class="simesy-cart-button"><p class="product woocommerce add_to_cart_inline ">';
+        if(config.show_variants_selector){
+          html_theme +=
+            '<a href="javascript:void(0)" class="button add-to-cart" data-id="' +
+            product_data.pro_id +
+            '"><i class="fa fa-spinner" aria-hidden="true"></i>' + add_to_cart_button_text + '</a>';
+        }else{
+          html_theme +=
+            '<a href="'+product_data.url+'" class="button btn-readmore">' + add_to_cart_button_text + '</a>';
+        }
+        html_theme += "</p></div>";
+      }
+      html_theme += "</li>";
+      html_theme +=
+        '<li><div class="woocommerce product compare-button"><a class="compare" href="' +
         product_data.url +
-        '" target="' +
-        product_link_target +
-        '">View Detail</a></div>';
+        '">Compare</a></div></li>';
+      html_theme +=
+        '<li><a href="javascript:void(0)" class="button sp-wqv-view-button sp-simesy-wqv-button"></a></li>';
+      html_theme +=
+        '<li><div class="yith-wcwl-add-to-wishlist"><div class="yith-wcwl-add-button"><a href="javascript:void(0)" class="add_to_wishlist single_add_to_wishlist" data-title="Wishlist"><i class="yith-wcwl-icon fa fa-heart-o"></i><span>Wishlist</span></a></div></div></li>';
+      html_theme += "</ul>";
       html_theme += "</div>";
-    }
-    html_theme += "</div>";
-    html_theme +=
-      '<div class="product-details"><div class="product-details-inner">' +
-      html_title +
-      html_price +
-      html_des+
-      "</div></div";
-  } else if (theme_style == "theme_six") {
-    html_theme += '<div class="simesy-product-image-area">' + html_img;
-    if(config.show_variants_selector){ 
-      html_theme += html_variant;
-    }
-    if (add_to_cart_button) {
-      html_theme += '<div class="simesy-buttons-area sp-text-center">';
-      html_theme +=
-        '<div class="simesy-cart-button"><p class="product woocommerce add_to_cart_inline ">';
-      if(config.show_variants_selector){
-        html_theme +=
-          '<a href="javascript:void(0)" class="button add-to-cart" data-id="' +
-          product_data.pro_id +
-          '"><i class="fa fa-spinner" aria-hidden="true"></i>' + add_to_cart_button_text + '</a>';
-      }else{
-        html_theme +=
-          '<a href="'+product_data.url+'" class="button btn-readmore">' + add_to_cart_button_text + '</a>';
-      }
-      html_theme += "</p></div>";
       html_theme += "</div>";
-    }
-    html_theme += "</div>";
-    html_theme +=
-      '<div class="product-details"><div class="product-details-inner">' +
-      html_title +
-      html_price +
-      html_des+
-      "</div></div";
-  } else if (theme_style == "theme_seven") {
-    html_theme +=
-      '<div class="simesy-product-image-area"><div class="product-overlay-color"></div>';
-    html_theme +=
-      '<div class="product-details"><div class="product-details-inner">' +
-      html_title +
-      html_price +
-      "</div></div>";
-    html_theme += html_img;
-    if(config.show_variants_selector){ 
-      html_theme += html_variant;
-    }
-    if (add_to_cart_button) {
-      html_theme += '<div class="simesy-buttons-area sp-text-center">';
       html_theme +=
-        '<div class="simesy-cart-button"><p class="product woocommerce add_to_cart_inline ">';
-      if(config.show_variants_selector){
-        html_theme +=
-          '<a href="javascript:void(0)" class="button add-to-cart" data-id="' +
-          product_data.pro_id +
-          '"><i class="fa fa-spinner" aria-hidden="true"></i>' + add_to_cart_button_text + '</a>';
-      }else{
-        html_theme +=
-          '<a href="'+product_data.url+'" class="button btn-readmore">' + add_to_cart_button_text + '</a>';
-      }
-      html_theme += "</p></div>";
+        '<div class="product-details"><div class="product-details-inner">' +
+        html_title +
+        html_price +
+        "</div></div>";
+    } else if (
+      theme_style == "theme_twenty_five" ||
+      theme_style == "theme_twenty_six"
+    ) {
+      html_theme += '<div class="simesy-product-box">';
+      html_theme += html_img;
+      html_theme +=
+        '<div class="product-details"><div class="product-details-inner sp-text-left">';
+      html_theme +=
+        '<div class="simesy-product-title-price">' + html_title + html_price;
       html_theme += "</div>";
-    }
-    html_theme += "</div>";
-  } else if (theme_style == "theme_eight") {
-    html_theme += '<div class="simesy-product-image-area">' + html_img + "";
-    if(config.show_variants_selector){ 
-      html_theme += html_variant;
-    }
-    if (add_to_cart_button) {
-      html_theme += '<div class="simesy-buttons-area sp-text-right">';
-      html_theme +=
-        '<div class="simesy-cart-button"><p class="product woocommerce add_to_cart_inline ">';
-      if(config.show_variants_selector){
-        html_theme +=
-          '<a href="javascript:void(0)" class="button add-to-cart" data-id="' +
-          product_data.pro_id +
-          '"><i class="fa fa-spinner" aria-hidden="true"></i>' + add_to_cart_button_text + '</a>';
-      }else{
-        html_theme +=
-          '<a href="'+product_data.url+'" class="button btn-readmore">' + add_to_cart_button_text + '</a>';
+      if(config.show_variants_selector){ 
+        html_theme += html_variant;
       }
-      html_theme += "</p></div>";
+      if (add_to_cart_button) {
+        html_theme +=
+          '<div class="simesy-cart-button"><p class="product woocommerce add_to_cart_inline ">';
+        if(config.show_variants_selector){
+          html_theme +=
+            '<a href="javascript:void(0)" class="button add-to-cart" data-id="' +
+            product_data.pro_id +
+            '"><i class="fa fa-spinner" aria-hidden="true"></i>' + add_to_cart_button_text + '</a>';
+        }else{
+          html_theme +=
+            '<a href="'+product_data.url+'" class="button btn-readmore">' + add_to_cart_button_text + '</a>';
+        }
+        html_theme += "</p></div>";
+      }
+      html_theme == "</div></div>";
       html_theme += "</div>";
-    }
-    html_theme += "</div>";
-    html_theme +=
-      '<div class="product-details"><div class="product-details-inner">' +
-      html_title +
-      html_price +
-      html_des+
-      "</div></div>";
-  } else if (theme_style == "theme_nine") {
-    html_theme += '<div class="simesy-product-image-area">' + html_img + "";
-    if(config.show_variants_selector){ 
-      html_theme += html_variant;
-    }
-    if (add_to_cart_button) {
-      html_theme += '<div class="simesy-buttons-area sp-text-center">';
+    } else if (theme_style == "theme_twenty_seven") {
+      html_theme += html_img;
       html_theme +=
-        '<div class="simesy-cart-button"><p class="product woocommerce add_to_cart_inline ">';
-      if(config.show_variants_selector){
-        html_theme +=
-          '<a href="javascript:void(0)" class="button add-to-cart" data-id="' +
-          product_data.pro_id +
-          '"><i class="fa fa-spinner" aria-hidden="true"></i>' + add_to_cart_button_text + '</a>';
-      }else{
-        html_theme +=
-          '<a href="'+product_data.url+'" class="button btn-readmore">' + add_to_cart_button_text + '</a>';
+        '<div class="product-details"><div class="product-details-inner">' +
+        html_title +
+        html_price +
+        html_des;
+      if(config.show_variants_selector){ 
+        html_theme += html_variant;
       }
-      html_theme += "</p></div>";
-      html_theme += "</div>";
-    }
-    html_theme += "</div>";
-    html_theme +=
-      '<div class="product-details"><div class="product-details-inner">' +
-      html_title +
-      html_price +
-      html_des+
-      "</div></div>";
-  } else if (theme_style == "theme_eleven") {
-    html_theme +=
-      '<div class="simesy-product-image-area"><div class="product-overlay-color"></div>' +
-      html_img +
-      "";
-    html_theme +=
-      '<div class="product-details"><div class="product-details-inner">' +
-      html_title +
-      "";
-    html_theme +=
-      '<div class="product-details-inner-inner">' + html_price + html_des;
-    if(config.show_variants_selector){ 
-      html_theme += html_variant;
-    }
-    if (add_to_cart_button) {
+      if (add_to_cart_button) {
+        html_theme +=
+          '<div class="simesy-cart-button"><p class="product woocommerce add_to_cart_inline ">';
+        if(config.show_variants_selector){
+          html_theme +=
+            '<a href="javascript:void(0)" class="button add-to-cart" data-id="' +
+            product_data.pro_id +
+            '"><i class="fa fa-spinner" aria-hidden="true"></i>' + add_to_cart_button_text + '</a>';
+        }else{
+          html_theme +=
+            '<a href="'+product_data.url+'" class="button btn-readmore">' + add_to_cart_button_text + '</a>';
+        }
+        html_theme += "</p></div>";
+      }
+      html_theme += "</div></div>";
+    } else {
+      html_theme += html_img;
       html_theme +=
-        '<div class="simesy-cart-button"><p class="product woocommerce add_to_cart_inline ">';
-      if(config.show_variants_selector){
-        html_theme +=
-          '<a href="javascript:void(0)" class="button add-to-cart" data-id="' +
-          product_data.pro_id +
-          '"><i class="fa fa-spinner" aria-hidden="true"></i>' + add_to_cart_button_text + '</a>';
-      }else{
-        html_theme +=
-          '<a href="'+product_data.url+'" class="button btn-readmore">' + add_to_cart_button_text + '</a>';
+        '<div class="product-details"><div class="product-details-inner">' +
+        html_title +
+        html_price +
+        html_des;
+      if(config.show_variants_selector){ 
+        html_theme += html_variant;
       }
-      html_theme += "</p></div>";
-    }
-    html_theme += "</div>";
-    html_theme += "</div></div>";
-    html_theme += "</div>";
-  } else if (theme_style == "theme_thirteen") {
-    html_theme += '<div class="simesy-product-image-area">';
-    if(config.show_variants_selector){ 
-      html_theme += html_variant;
-    }
-    if (add_to_cart_button) {
-      html_theme +=
-        '<div class="simesy-cart-button"><p class="product woocommerce add_to_cart_inline ">';
-      if(config.show_variants_selector){
-        html_theme +=
-          '<a href="javascript:void(0)" class="button add-to-cart" data-id="' +
-          product_data.pro_id +
-          '"><i class="fa fa-spinner" aria-hidden="true"></i>' + add_to_cart_button_text + '</a>';
-      }else{
-        html_theme +=
-          '<a href="'+product_data.url+'" class="button btn-readmore">' + add_to_cart_button_text + '</a>';
-      }
-      html_theme += "</p></div>";
-    }
-    html_theme += html_img;
-    html_theme += "</div>";
-    html_theme +=
-      '<div class="product-details"><div class="product-details-inner">' +
-      html_title +
-      html_price +
-      "</div>";
-  } else if (theme_style == "theme_fourteen") {
-    html_theme += html_img;
-    html_theme += '<div class="product-details">';
-    html_theme +=
-      '<div class="product-details-inner">' +
-      html_title +
-      html_price +
-      html_des +
-      "</div>";
-    if(config.show_variants_selector){ 
-      html_theme += html_variant;
-    }
-    if (add_to_cart_button) {
-      html_theme +=
-        '<div class="simesy-cart-button"><p class="product woocommerce add_to_cart_inline ">';
-      if(config.show_variants_selector){
-        html_theme +=
-          '<a href="javascript:void(0)" class="button add-to-cart" data-id="' +
-          product_data.pro_id +
-          '"><i class="fa fa-spinner" aria-hidden="true"></i>' + add_to_cart_button_text + '</a>';
-      }else{
-        html_theme +=
-          '<a href="'+product_data.url+'" class="button btn-readmore">' + add_to_cart_button_text + '</a>';
-      }
-      html_theme += "</p></div>";
-    }
-    html_theme += "</div>";
-  } else if (theme_style == "theme_fifteen") {
-    html_theme += '<div class="simesy-product-image-area">' + html_img;
-    if(config.show_variants_selector){ 
-      html_theme += html_variant;
-    }
-    if (add_to_cart_button) {
-      html_theme +=
-        '<div class="simesy-cart-button"><p class="product woocommerce add_to_cart_inline ">';
-      if(config.show_variants_selector){
-        html_theme +=
-          '<a href="javascript:void(0)" class="button add-to-cart" data-id="' +
-          product_data.pro_id +
-          '"><i class="fa fa-spinner" aria-hidden="true"></i>' + add_to_cart_button_text + '</a>';
-      }else{
-        html_theme +=
-          '<a href="'+product_data.url+'" class="button btn-readmore">' + add_to_cart_button_text + '</a>';
-      }
-      html_theme += "</p></div>";
-    }
-    html_theme += "</div>";
-    html_theme +=
-      '<div class="product-details"><div class="product-details-inner">' +
-      html_title +
-      html_price +
-      html_des + 
-      "</div></div>";
-  } else if (theme_style == "theme_sixteen") {
-    html_theme +=
-      '<div class="simesy-product-image-area">' + html_img + "</div>";
-    html_theme +=
-      '<div class="product-details"><div class="product-details-inner">' +
-      html_title +
-      html_price +
-      html_des;
-    if(config.show_variants_selector){ 
-      html_theme += html_variant;
-    }
-    if (add_to_cart_button) {
-      html_theme +=
-        '<div class="simesy-cart-button"><p class="product woocommerce add_to_cart_inline ">';
-      if(config.show_variants_selector){
-        html_theme +=
-          '<a href="javascript:void(0)" class="button add-to-cart" data-id="' +
-          product_data.pro_id +
-          '"><i class="fa fa-spinner" aria-hidden="true"></i>' + add_to_cart_button_text + '</a>';
-      }else{
-        html_theme +=
-          '<a href="'+product_data.url+'" class="button btn-readmore">' + add_to_cart_button_text + '</a>';
-      }
-      html_theme += "</p></div>";
-    }
-    html_theme += "</div></div>";
-  } else if (theme_style == "theme_seventeen") {
-    html_theme += '<div class="simesy-product-image-area">' + html_img;
-    if(config.show_variants_selector){ 
-      html_theme += html_variant;
-    }
-    if (add_to_cart_button) {
-      html_theme +=
-        '<div class="simesy-cart-button"><p class="product woocommerce add_to_cart_inline ">';
-      if(config.show_variants_selector){
-        html_theme +=
-          '<a href="javascript:void(0)" class="button add-to-cart" data-id="' +
-          product_data.pro_id +
-          '"><i class="fa fa-spinner" aria-hidden="true"></i>' + add_to_cart_button_text + '</a>';
-      }else{
-        html_theme +=
-          '<a href="'+product_data.url+'" class="button btn-readmore">' + add_to_cart_button_text + '</a>';
-      }
-      html_theme += "</p></div>";
-    }
-    html_theme += "</div>";
-    html_theme +=
-      '<div class="product-details"><div class="product-details-inner">' +
-      html_title +
-      html_price +
-      html_des +
-      "</div></div>";
-  } else if (theme_style == "theme_eighteen") {
-    //html_theme += html_img;
-    html_theme +=
-      '<div class="product-details"><div class="product-details-inner">' +
-      html_price +
-      html_title +
-      html_des;
-    if(config.show_variants_selector){ 
-      html_theme += html_variant;
-    }
-    if (add_to_cart_button) {
-      html_theme +=
-        '<div class="simesy-cart-button"><p class="product woocommerce add_to_cart_inline ">';
-      if(config.show_variants_selector){
-        html_theme +=
-          '<a href="javascript:void(0)" class="button add-to-cart" data-id="' +
-          product_data.pro_id +
-          '"><i class="fa fa-spinner" aria-hidden="true"></i>' + add_to_cart_button_text + '</a>';
-      }else{
-        html_theme +=
-          '<a href="'+product_data.url+'" class="button btn-readmore">' + add_to_cart_button_text + '</a>';
-      }
-      html_theme += "</p></div>";
-    }
-    html += "</div>";
-    html_theme += "</div>";
-  } else if (theme_style.trim() == "theme_twenty") {
-    html_theme += '<div class="simesy-product-box">';
-    html_theme += '<div class="simesy-product-cat"></div>';
-    html_theme += html_title;
-    html_theme += html_img_box;
-    html_theme +=
-      '<div class="product-details"><div class="product-details-inner">' +
-      html_price +
-      "</div></div>";
-    html_theme += '<div class="product-wishlist-com">';
-    html_theme +=
-      '<div class="woocommerce product compare-button"><a href="javascript:void(0)" class="compare">Compare</a></div>';
-    html_theme +=
-      '<div class="yith-wcwl-add-to-wishlist"><div class="yith-wcwl-add-button"><a href="javascript:void(0)" class="add_to_wishlist single_add_to_wishlist" data-title="Wishlist"><i class="yith-wcwl-icon fa fa-heart-o"></i><span>Wishlist</span></a></div></div>';
-    html_theme += "</div>";
-    html_theme += "</div>";
-  } else if (theme_style == "theme_twenty_one") {
-    html_theme += '<div class="simesy-product-box">';
-    html_theme += html_img_box;
-    html_theme += '<div class="simesy-product-content-area">';
-    html_theme +=
-      '<div class="product-details"><div class="product-details-inner sp-text-left">' +
-      html_title +
-      html_price +
-      "</div></div>";
-    html_theme += '<div class="product-wishlist-com">';
-    html_theme +=
-      '<div class="woocommerce product compare-button"><a href="javascript:void(0)" class="compare">Compare</a></div>';
-    html_theme +=
-      '<div class="yith-wcwl-add-to-wishlist"><div class="yith-wcwl-add-button"><a href="javascript:void(0)" class="add_to_wishlist single_add_to_wishlist" data-title="Wishlist"><i class="yith-wcwl-icon fa fa-heart-o"></i><span>Wishlist</span></a></div></div>';
-    html_theme += "</div>";
-    html_theme += "</div>";
-    html_theme += "</div>";
-  } else if (theme_style == "theme_twenty_two") {
-    html_theme +=
-      '<div class="product-details"><div class="product-details-inner sp-text-left">' +
-      html_title +
-      html_price +
-      "</div></div>";
-    html_theme += html_img;
-  } else if (theme_style == "theme_twenty_three") {
-    html_theme += '<div class="simesy-product-image-area">';
-    html_theme += html_img;
-    html_theme += '<div class="simesy-product-add-to-cart sp-text-center">';
-    if(config.show_variants_selector){ 
-      html_theme += html_variant;
-    }
-    if (add_to_cart_button) {
-      html_theme +=
-        '<div class="simesy-cart-button"><p class="product woocommerce add_to_cart_inline ">';
-      if(config.show_variants_selector){
-        html_theme +=
-          '<a href="javascript:void(0)" class="button add-to-cart" data-id="' +
-          product_data.pro_id +
-          '"><i class="fa fa-spinner" aria-hidden="true"></i>' + add_to_cart_button_text + '</a>';
-      }else{
-        html_theme +=
-          '<a href="'+product_data.url+'" class="button btn-readmore">' + add_to_cart_button_text + '</a>';
-      }
-      html_theme += "</p></div>";
-    }
-    html_theme += "</div>";
-    html_theme +=
-      '<div class="product-details"><div class="product-details-inner sp-text-center">' +
-      html_title +
-      html_price +
-      "</div></div>";
-    html_theme += "</div>";
-  } else if (theme_style == "theme_twenty_four") {
-    html_theme += '<div class="simesy-product-image-area">';
-    html_theme += html_img;
-    html_theme += '<div class="simesy-product-add-to-cart sp-text-center">';
-    html_theme += "<ul>";
-    html_theme += "<li>";
-    if(config.show_variants_selector){ 
-      html_theme += html_variant;
-    }
-    if (add_to_cart_button) {
-      html_theme +=
-        '<div class="simesy-cart-button"><p class="product woocommerce add_to_cart_inline ">';
-      if(config.show_variants_selector){
-        html_theme +=
-          '<a href="javascript:void(0)" class="button add-to-cart" data-id="' +
-          product_data.pro_id +
-          '"><i class="fa fa-spinner" aria-hidden="true"></i>' + add_to_cart_button_text + '</a>';
-      }else{
-        html_theme +=
-          '<a href="'+product_data.url+'" class="button btn-readmore">' + add_to_cart_button_text + '</a>';
-      }
-      html_theme += "</p></div>";
-    }
-    html_theme += "</li>";
-    html_theme +=
-      '<li><div class="woocommerce product compare-button"><a class="compare" href="' +
-      product_data.url +
-      '">Compare</a></div></li>';
-    html_theme +=
-      '<li><a href="javascript:void(0)" class="button sp-wqv-view-button sp-simesy-wqv-button"></a></li>';
-    html_theme +=
-      '<li><div class="yith-wcwl-add-to-wishlist"><div class="yith-wcwl-add-button"><a href="javascript:void(0)" class="add_to_wishlist single_add_to_wishlist" data-title="Wishlist"><i class="yith-wcwl-icon fa fa-heart-o"></i><span>Wishlist</span></a></div></div></li>';
-    html_theme += "</ul>";
-    html_theme += "</div>";
-    html_theme += "</div>";
-    html_theme +=
-      '<div class="product-details"><div class="product-details-inner">' +
-      html_title +
-      html_price +
-      "</div></div>";
-  } else if (
-    theme_style == "theme_twenty_five" ||
-    theme_style == "theme_twenty_six"
-  ) {
-    html_theme += '<div class="simesy-product-box">';
-    html_theme += html_img;
-    html_theme +=
-      '<div class="product-details"><div class="product-details-inner sp-text-left">';
-    html_theme +=
-      '<div class="simesy-product-title-price">' + html_title + html_price;
-    html_theme += "</div>";
-    if(config.show_variants_selector){ 
-      html_theme += html_variant;
-    }
-    if (add_to_cart_button) {
-      html_theme +=
-        '<div class="simesy-cart-button"><p class="product woocommerce add_to_cart_inline ">';
-      if(config.show_variants_selector){
-        html_theme +=
-          '<a href="javascript:void(0)" class="button add-to-cart" data-id="' +
-          product_data.pro_id +
-          '"><i class="fa fa-spinner" aria-hidden="true"></i>' + add_to_cart_button_text + '</a>';
-      }else{
-        html_theme +=
-          '<a href="'+product_data.url+'" class="button btn-readmore">' + add_to_cart_button_text + '</a>';
-      }
-      html_theme += "</p></div>";
-    }
-    html_theme == "</div></div>";
-    html_theme += "</div>";
-  } else if (theme_style == "theme_twenty_seven") {
-    html_theme += html_img;
-    html_theme +=
-      '<div class="product-details"><div class="product-details-inner">' +
-      html_title +
-      html_price +
-      html_des;
-    if(config.show_variants_selector){ 
-      html_theme += html_variant;
-    }
-    if (add_to_cart_button) {
-      html_theme +=
-        '<div class="simesy-cart-button"><p class="product woocommerce add_to_cart_inline ">';
-      if(config.show_variants_selector){
-        html_theme +=
-          '<a href="javascript:void(0)" class="button add-to-cart" data-id="' +
-          product_data.pro_id +
-          '"><i class="fa fa-spinner" aria-hidden="true"></i>' + add_to_cart_button_text + '</a>';
-      }else{
-        html_theme +=
-          '<a href="'+product_data.url+'" class="button btn-readmore">' + add_to_cart_button_text + '</a>';
-      }
-      html_theme += "</p></div>";
-    }
-    html_theme += "</div></div>";
-  } else {
-    html_theme += html_img;
-    html_theme +=
-      '<div class="product-details"><div class="product-details-inner">' +
-      html_title +
-      html_price +
-      html_des;
-    if(config.show_variants_selector){ 
-      html_theme += html_variant;
-    }
 
-    if (add_to_cart_button) {
-      html_theme +=
-        '<div class="simesy-cart-button"><p class="product woocommerce add_to_cart_inline ">';
-      if(config.show_variants_selector){
+      if (add_to_cart_button) {
         html_theme +=
-          '<a href="javascript:void(0)" class="button add-to-cart" data-id="' +
-          product_data.pro_id +
-          '"><i class="fa fa-spinner" aria-hidden="true"></i>' + add_to_cart_button_text + '</a>';
-      }else{
-        html_theme +=
-          '<a href="'+product_data.url+'" class="button btn-readmore">' + add_to_cart_button_text + '</a>';
+          '<div class="simesy-cart-button"><p class="product woocommerce add_to_cart_inline ">';
+        if(config.show_variants_selector){
+          html_theme +=
+            '<a href="javascript:void(0)" class="button add-to-cart" data-id="' +
+            product_data.pro_id +
+            '"><i class="fa fa-spinner" aria-hidden="true"></i>' + add_to_cart_button_text + '</a>';
+        }else{
+          html_theme +=
+            '<a href="'+product_data.url+'" class="button btn-readmore">' + add_to_cart_button_text + '</a>';
+        }
+        html_theme += "</p></div>";
       }
-      html_theme += "</p></div>";
+      html_theme += "</div>";
     }
-    html_theme += "</div>";
-  }
-  html_theme += "</div></div>";
+    html_theme += "</div></div>";
 
-  $("#simesy-product-slider-" + id + "").append(html_theme);
-});
+    $("#simesy-product-slider-" + id + "").append(html_theme);
+  });
+}
 function smartTrim(str, length, appendix) {
   var check_array = str.split(" ");
   var str_title = str.split(/\s+/).slice(0, length).join(" ");
