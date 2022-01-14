@@ -7732,7 +7732,7 @@ $("body")
 var id = $(this).data("slider-id");
 var shop = window.Shopify.shop;
 $.ajax({
-url: "http://product-slider-dev.simesy.com/api/get_slider",
+url: "http://product-slider.simesy.com/api/get_slider",
 type: "post",
 dataType: "JSON",
 async: false,
